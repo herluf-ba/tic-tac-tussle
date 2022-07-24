@@ -13,8 +13,16 @@ pub enum Tile {
     Tac,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum State {
+    PreGame,
+    Playing,
+    Ended,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GameState {
+    pub state: State,
     pub board: [Tile; 9],
     pub active_player_id: u64,
     pub players: HashMap<u64, Player>,
@@ -24,6 +32,7 @@ pub struct GameState {
 impl Default for GameState {
     fn default() -> Self {
         Self {
+            state: State::PreGame,
             board: [
                 Tile::Empty,
                 Tile::Empty,
@@ -42,9 +51,23 @@ impl Default for GameState {
     }
 }
 
+/// The various reasons why game has been ended
+#[derive(Debug, Clone, Serialize, PartialEq, Deserialize)]
+pub enum EndGameReason {
+    // In tic tac toe it doesn't make sense to keep playing when one of the players disconnect.
+    // Note that it might make sense to keep playing in some other game (like Team Fight Tactics for instance).
+    PlayerDisconnected { player_id: u64 },
+    PlayerWon { winner: u64 },
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Deserialize)]
 pub enum GameEvent {
-    ResetState,
+    BeginGame {
+        goes_first: u64,
+    },
+    EndGame {
+        reason: EndGameReason,
+    },
     PlayerJoined {
         player_id: u64,
         name: String,
@@ -64,7 +87,20 @@ impl GameEvent {
         use GameEvent::*;
 
         match self {
-            ResetState => {}
+            BeginGame { goes_first } => {
+                let player_is_unknown = game_state.players.contains_key(goes_first);
+                if game_state.state != State::PreGame || player_is_unknown {
+                    return false;
+                }
+            }
+            EndGame { reason } => match reason {
+                EndGameReason::PlayerWon { winner: _ } => {
+                    if game_state.state != State::Playing {
+                        return false;
+                    }
+                }
+                _ => {}
+            },
             PlayerJoined { player_id, name: _ } => {
                 if game_state.players.contains_key(player_id) {
                     return false;
@@ -103,7 +139,8 @@ impl GameState {
     fn reduce(&mut self, event: &GameEvent) {
         use GameEvent::*;
         match event {
-            ResetState => *self = GameState::default(),
+            BeginGame { goes_first } => self.active_player_id = *goes_first,
+            EndGame { reason: _ } => self.state = State::Ended,
             PlayerJoined { player_id, name } => {
                 self.players.insert(
                     *player_id,
