@@ -7,6 +7,6 @@ edition = "2021"
 store = { path = "../store" }
 serde = { version = "1", features = ["derive"] }
 bincode = "1.3.1"
-renet = { git = "https://github.com/lucaspoffo/renet", rev = "e635b819123d7c90ea7c4a59d79af7660ec0c0df" }
+renet = "0.9.0"
 log = "0.4"
 env_logger="0.9.0"
