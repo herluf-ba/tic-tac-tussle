@@ -10,7 +10,7 @@ use std::time::{Duration, Instant, SystemTime};
 // TicTacTussle converted to utf-8 codes is 84 105 99 84 97 99 84 117 115 115 108 101
 // If you add those up you get 1208.
 // It is not necessary to do the protocol id like this but it is fun 🤷‍♂️
-const PROTOCOL_ID: u64 = 1208;
+pub const PROTOCOL_ID: u64 = 1208;
 
 /// Utility function for extracting a players name from renet user data
 fn name_from_user_data(user_data: &[u8; NETCODE_USER_DATA_BYTES]) -> String {

@@ -15,11 +15,11 @@ pub enum Tile {
     Tac,
 }
 
-/// The different stages a game can be in
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub enum Stage {
+/// The different states a game can be in. (not to be confused with the entire "GameState")
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum State {
     PreGame,
-    Playing,
+    InGame,
     Ended,
 }
 
@@ -29,7 +29,7 @@ type PlayerId = u64;
 /// A GameState object that is able to keep track of a game of TicTacTussle
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GameState {
-    pub stage: Stage,
+    pub stage: State,
     pub board: [Tile; 9],
     pub active_player_id: PlayerId,
     pub players: HashMap<PlayerId, Player>,
@@ -39,7 +39,7 @@ pub struct GameState {
 impl Default for GameState {
     fn default() -> Self {
         Self {
-            GameState: GameState::PreGame,
+            stage: State::PreGame,
             board: [
                 Tile::Empty,
                 Tile::Empty,
@@ -91,19 +91,19 @@ pub enum GameEvent {
 }
 
 impl GameState {
-     /// Determines whether an event is valid considering the current GameState
+    /// Determines whether an event is valid considering the current GameState
     pub fn validate(&self, event: &GameEvent) -> bool {
         use GameEvent::*;
         match event {
             BeginGame { goes_first } => {
                 let player_is_unknown = self.players.contains_key(goes_first);
-                if self.stage != Stage::PreGame || player_is_unknown {
+                if self.stage != State::PreGame || player_is_unknown {
                     return false;
                 }
             }
             EndGame { reason } => match reason {
                 EndGameReason::PlayerWon { winner: _ } => {
-                    if self.stage != Stage::Playing {
+                    if self.stage != State::InGame {
                         return false;
                     }
                 }
@@ -141,14 +141,14 @@ impl GameState {
 
         true
     }
-    
+
     /// Consumes an event, modifying the GameState and adding the event to its history
-    /// NOTE: consume assumes the event to have already been validated and will accept *any* event passed to it 
+    /// NOTE: consume assumes the event to have already been validated and will accept *any* event passed to it
     pub fn consume(&mut self, valid_event: &GameEvent) {
         use GameEvent::*;
         match valid_event {
             BeginGame { goes_first } => self.active_player_id = *goes_first,
-            EndGame { reason: _ } => self.stage = Stage::Ended,
+            EndGame { reason: _ } => self.stage = State::Ended,
             PlayerJoined { player_id, name } => {
                 self.players.insert(
                     *player_id,
