@@ -21,8 +21,9 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         })
         .insert(UIRoot)
         .with_children(|parent| {
+            // TODO: get message from app state
             parent.spawn_bundle(TextBundle::from_section(
-                "Something went wrong! please restart TicTacTussle 🙏",
+                format!("{}\nplease restart TicTacTussle 🙏", "MESSAGE"),
                 TextStyle {
                     font: asset_server.load("Inconsolata.ttf"),
                     font_size: 24.0,
