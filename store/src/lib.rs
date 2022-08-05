@@ -19,7 +19,7 @@ pub enum Tile {
 
 /// The different states a game can be in. (not to be confused with the entire "GameState")
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum State {
+pub enum Stage {
     PreGame,
     InGame,
     Ended,
@@ -31,7 +31,7 @@ type PlayerId = u64;
 /// A GameState object that is able to keep track of a game of TicTacTussle
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GameState {
-    pub stage: State,
+    pub stage: Stage,
     pub board: [Tile; 9],
     pub active_player_id: PlayerId,
     pub players: HashMap<PlayerId, Player>,
@@ -41,7 +41,7 @@ pub struct GameState {
 impl Default for GameState {
     fn default() -> Self {
         Self {
-            stage: State::PreGame,
+            stage: Stage::PreGame,
             board: [
                 Tile::Empty,
                 Tile::Empty,
@@ -86,13 +86,13 @@ impl GameState {
         match event {
             BeginGame { goes_first } => {
                 let player_is_unknown = self.players.contains_key(goes_first);
-                if self.stage != State::PreGame || player_is_unknown {
+                if self.stage != Stage::PreGame || player_is_unknown {
                     return false;
                 }
             }
             EndGame { reason } => match reason {
                 EndGameReason::PlayerWon { winner: _ } => {
-                    if self.stage != State::InGame {
+                    if self.stage != Stage::InGame {
                         return false;
                     }
                 }
@@ -134,8 +134,11 @@ impl GameState {
     pub fn consume(&mut self, valid_event: &GameEvent) {
         use GameEvent::*;
         match valid_event {
-            BeginGame { goes_first } => self.active_player_id = *goes_first,
-            EndGame { reason: _ } => self.stage = State::Ended,
+            BeginGame { goes_first } => {
+                self.active_player_id = *goes_first;
+                self.stage = Stage::InGame;
+            }
+            EndGame { reason: _ } => self.stage = Stage::Ended,
             PlayerJoined { player_id, name } => {
                 self.players.insert(
                     *player_id,
