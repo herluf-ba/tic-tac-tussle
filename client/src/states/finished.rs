@@ -8,9 +8,6 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         .spawn_bundle(NodeBundle {
             style: Style {
                 size: Size::new(Val::Percent(100.0), Val::Percent(100.0)),
-                // Bevy UI is placing children such that first child goes at the bottom
-                // This is the opposite of how a browser does it, but we can get back to
-                // familiarity by just using ColumnReverse 👍
                 flex_direction: FlexDirection::ColumnReverse,
                 align_items: AlignItems::Center,
                 justify_content: JustifyContent::Center,
