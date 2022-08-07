@@ -1,4 +1,4 @@
-use bevy::{ecs::schedule::ShouldRun, prelude::*};
+use bevy::prelude::*;
 use bevy_renet::{run_if_client_connected, RenetClientPlugin};
 use renet::{
     ClientAuthentication, RenetClient, RenetConnectionConfig, RenetError, NETCODE_USER_DATA_BYTES,
@@ -16,12 +16,11 @@ fn main() {
 
     App::new()
         .insert_resource(WindowDescriptor {
-            title: "TicTacTussle".to_string(),
+            title: format!("TicTacTussle <{}>", username),
             width: 480.0,
             height: 540.0,
             ..default()
         })
-        .insert_resource(Msaa { samples: 4 })
         .insert_resource(ClearColor(Color::hex("282828").unwrap()))
         .add_plugins(DefaultPlugins)
         // Renet setup
@@ -37,17 +36,12 @@ fn main() {
         .add_event::<GameEvent>()
         // Add setup function to spawn UI and board graphics
         .add_startup_system(setup)
+        // Add systems for playing TicTacTussle
         .add_system(change_ui_by_stage)
-        // Update Ui in pregame state
-        .add_system(update_waiting_text.with_run_criteria(run_if_pregame))
-        // Add input and update system, but only run them when we are ingame
-        .add_system_set(
-            SystemSet::new()
-                .with_run_criteria(run_if_ingame)
-                .with_system(input)
-                .with_system(update_board)
-                .with_system(update_in_game_ui),
-        )
+        .add_system(update_waiting_text)
+        .add_system(update_in_game_ui)
+        .add_system(update_board)
+        .add_system(input)
         // Finally we run the thing!
         .run();
 }
@@ -62,6 +56,9 @@ struct HoverDot(pub TileIndex);
 
 #[derive(Component)]
 struct WaitingText;
+
+#[derive(Component)]
+struct PlayerHandle(pub u64);
 
 ////////// SETUP //////////
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
@@ -113,7 +110,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                 },
                 size: Size::new(Val::Percent(100.0), Val::Px(60.0)),
                 align_items: AlignItems::Center,
-                justify_content: JustifyContent::SpaceBetween,
+                justify_content: JustifyContent::Center,
                 ..default()
             },
             color: Color::NONE.into(),
@@ -137,10 +134,16 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 ////////// UPDATE SYSTEMS //////////
 fn input(
     windows: Res<Windows>,
-    mut hover_dots: Query<(&HoverDot, &mut Sprite)>,
     input: Res<Input<MouseButton>>,
+    game_state: Res<GameState>,
+    mut hover_dots: Query<(&HoverDot, &mut Sprite)>,
     mut client: ResMut<RenetClient>,
 ) {
+    // We only want to handle inputs once we are ingame
+    if game_state.stage != store::Stage::InGame {
+        return;
+    }
+
     let window = windows.get_primary().unwrap();
     if let Some(mouse_position) = window.cursor_position() {
         // Determine the index of the tile that the mouse is currently over
@@ -211,39 +214,96 @@ fn update_board(
 }
 
 fn update_waiting_text(mut text_query: Query<&mut Text, With<WaitingText>>, time: Res<Time>) {
-    let mut text = text_query.get_single_mut().unwrap();
-    let num_dots = (time.time_since_startup().as_secs() % 3) + 1;
-    text.sections[0].value = format!(
-        "Waiting for an opponent{}{}",
-        ".".repeat(num_dots as usize),
-        // Pad with spaces to avoid text changing width and dancing all around the screen 🕺
-        " ".repeat(3 - num_dots as usize)
-    );
+    if let Ok(mut text) = text_query.get_single_mut() {
+        let num_dots = (time.time_since_startup().as_secs() % 3) + 1;
+        text.sections[0].value = format!(
+            "Waiting for an opponent{}{}",
+            ".".repeat(num_dots as usize),
+            // Pad with spaces to avoid text changing width and dancing all around the screen 🕺
+            " ".repeat(3 - num_dots as usize)
+        );
+    }
 }
 
 fn change_ui_by_stage(
     mut commands: Commands,
+    game_state: Res<GameState>,
     mut game_events: EventReader<GameEvent>,
-    waiting_text: Query<Entity, With<WaitingText>>,
+    mut ui_root: Query<(Entity, &mut Style), With<UIRoot>>,
+    asset_server: Res<AssetServer>,
 ) {
+    let (ui_root_entity, mut ui_root_style) = ui_root.get_single_mut().unwrap();
+    let mut ui_root = commands.entity(ui_root_entity);
+
     for event in game_events.iter() {
         match event {
             GameEvent::BeginGame { goes_first: _ } => {
                 // Remove waiting text when game begins
-                commands
-                    .entity(waiting_text.get_single().unwrap())
-                    .despawn_recursive();
+                ui_root.despawn_descendants();
 
-                // TODO: Spawn in game ui
+                // Spawn in game ui
+                ui_root_style.justify_content = JustifyContent::SpaceBetween;
+                ui_root.with_children(|parent| {
+                    for (player_id, player) in game_state.players.iter() {
+                        let is_active_player = game_state.active_player_id == *player_id;
+                        let is_tac_player = player.piece == store::Tile::Tac;
+
+                        parent
+                            .spawn_bundle(TextBundle::from_section(
+                                player.name.clone(),
+                                TextStyle {
+                                    font: asset_server.load("Inconsolata.ttf"),
+                                    font_size: 24.0,
+                                    color: if !is_active_player {
+                                        Color::hex("ebdbb2").unwrap()
+                                    } else {
+                                        if is_tac_player {
+                                            Color::hex("d65d0e").unwrap()
+                                        } else {
+                                            Color::hex("458488").unwrap()
+                                        }
+                                    },
+                                },
+                            ))
+                            .insert(PlayerHandle(*player_id));
+                    }
+                });
             }
             GameEvent::EndGame { reason } => {
-                // TODO: Despawn in game ui
+                // Despawn in game ui
+                ui_root.despawn_descendants();
+                ui_root_style.justify_content = JustifyContent::Center;
                 match reason {
                     EndGameReason::PlayerLeft { player_id: _ } => {
-                        // TODO: Spawn error text
+                        ui_root.with_children(|parent| {
+                            parent.spawn_bundle(TextBundle::from_section(
+                                "Your opponent has left",
+                                TextStyle {
+                                    font: asset_server.load("Inconsolata.ttf"),
+                                    font_size: 24.0,
+                                    color: Color::hex("ebdbb2").unwrap(),
+                                },
+                            ));
+                        });
                     }
-                    EndGameReason::PlayerWon { winner: _ } => {
-                        // TODO: Spawn celebration
+                    EndGameReason::PlayerWon { winner } => {
+                        ui_root.with_children(|parent| {
+                            let winner_player = game_state.players.get(winner).unwrap();
+                            let is_tac_player = winner_player.piece == store::Tile::Tac;
+
+                            parent.spawn_bundle(TextBundle::from_section(
+                                format!("{} has won!", winner_player.name.clone()),
+                                TextStyle {
+                                    font: asset_server.load("Inconsolata.ttf"),
+                                    font_size: 24.0,
+                                    color: if is_tac_player {
+                                        Color::hex("d65d0e").unwrap()
+                                    } else {
+                                        Color::hex("458488").unwrap()
+                                    },
+                                },
+                            ));
+                        });
                     }
                 }
             }
@@ -252,14 +312,32 @@ fn change_ui_by_stage(
     }
 }
 
-fn update_in_game_ui(_game_state: Res<GameState>, mut game_events: EventReader<GameEvent>) {
+fn update_in_game_ui(
+    game_state: Res<GameState>,
+    mut game_events: EventReader<GameEvent>,
+    mut player_handles: Query<(&PlayerHandle, &mut Text)>,
+) {
     for event in game_events.iter() {
         match event {
             GameEvent::PlaceTile {
                 player_id: _,
                 at: _,
             } => {
-                // TODO: Change highlighted player
+                for (handle, mut text) in player_handles.iter_mut() {
+                    let is_active_player = game_state.active_player_id == handle.0;
+                    let is_tac_player =
+                        game_state.players.get(&handle.0).unwrap().piece == store::Tile::Tac;
+
+                    text.sections[0].style.color = if !is_active_player {
+                        Color::hex("ebdbb2").unwrap()
+                    } else {
+                        if is_tac_player {
+                            Color::hex("d65d0e").unwrap()
+                        } else {
+                            Color::hex("458488").unwrap()
+                        }
+                    };
+                }
             }
             _ => {}
         }
@@ -320,20 +398,5 @@ fn receive_events_from_server(
 fn handle_renet_error(mut renet_error: EventReader<RenetError>) {
     for err in renet_error.iter() {
         panic!("{}", err);
-    }
-}
-
-////////// RUN CRITERIA //////////
-fn run_if_pregame(game_state: Res<GameState>) -> ShouldRun {
-    match game_state.stage {
-        store::Stage::PreGame => ShouldRun::Yes,
-        _ => ShouldRun::No,
-    }
-}
-
-fn run_if_ingame(game_state: Res<GameState>) -> ShouldRun {
-    match game_state.stage {
-        store::Stage::InGame => ShouldRun::Yes,
-        _ => ShouldRun::No,
     }
 }
