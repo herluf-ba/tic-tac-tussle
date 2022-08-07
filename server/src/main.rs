@@ -10,7 +10,7 @@ use std::time::{Duration, Instant, SystemTime};
 // TicTacTussle converted to utf-8 codes is 84 105 99 84 97 99 84 117 115 115 108 101
 // If you add those up you get 1208.
 // It is not necessary to do the protocol id like this but it is fun 🤷‍♂️
-const PROTOCOL_ID: u64 = 1208;
+pub const PROTOCOL_ID: u64 = 1208;
 
 /// Utility function for extracting a players name from renet user data
 fn name_from_user_data(user_data: &[u8; NETCODE_USER_DATA_BYTES]) -> String {
@@ -58,37 +58,44 @@ fn main() {
         while let Some(event) = server.get_event() {
             match event {
                 ServerEvent::ClientConnected(id, user_data) => {
+                    // Tell the recently joined player about the other player
+                    for (player_id, player) in game_state.players.iter() {
+                        let event = store::GameEvent::PlayerJoined {
+                            player_id: *player_id,
+                            name: player.name.clone(),
+                        };
+                        server.send_message(id, 0, bincode::serialize(&event).unwrap());
+                    }
+
                     // Add the new player to the game
                     let event = store::GameEvent::PlayerJoined {
                         player_id: id,
                         name: name_from_user_data(&user_data),
                     };
-                    game_state.dispatch(&event);
+                    game_state.consume(&event);
 
-                    // Tell all other players that a new player has joined
-                    for player_id in game_state.players.keys() {
-                        server.send_message(*player_id, 0, bincode::serialize(&event).unwrap());
-                    }
+                    // Tell all players that a new player has joined
+                    server.broadcast_message(0, bincode::serialize(&event).unwrap());
 
                     info!("Client {} connected.", id);
                     // In TicTacTussle the game can begin once two players has joined
                     if game_state.players.len() == 2 {
                         let event = store::GameEvent::BeginGame { goes_first: id };
-                        game_state.dispatch(&event);
+                        game_state.consume(&event);
                         server.broadcast_message(0, bincode::serialize(&event).unwrap());
                         trace!("The game gas begun");
                     }
                 }
                 ServerEvent::ClientDisconnected(id) => {
-                    // First dispatch a disconnect event
+                    // First consume a disconnect event
                     let event = store::GameEvent::PlayerDisconnected { player_id: id };
-                    game_state.dispatch(&event);
+                    game_state.consume(&event);
                     server.broadcast_message(0, bincode::serialize(&event).unwrap());
                     info!("Client {} disconnected", id);
 
                     // Then end the game, since tic tac toe can't go on with a single player
                     let event = store::GameEvent::PlayerDisconnected { player_id: id };
-                    game_state.dispatch(&event);
+                    game_state.consume(&event);
                     server.broadcast_message(0, bincode::serialize(&event).unwrap());
 
                     // NOTE: Since we don't authenticate users we can't do any reconnection attempts.
@@ -101,10 +108,18 @@ fn main() {
         for client_id in server.clients_id().into_iter() {
             while let Some(message) = server.receive_message(client_id, 0) {
                 if let Ok(event) = bincode::deserialize::<store::GameEvent>(&message) {
-                    if event.is_valid_on(&game_state) {
-                        game_state.dispatch(&event);
-                        trace!("Player {} sent valid event:\n\t{:#?}", client_id, event);
+                    if game_state.validate(&event) {
+                        game_state.consume(&event);
+                        trace!("Player {} sent:\n\t{:#?}", client_id, event);
                         server.broadcast_message(0, bincode::serialize(&event).unwrap());
+
+                        // Determine if a player has won the game
+                        if let Some(winner) = game_state.determine_winner() {
+                            let event = store::GameEvent::EndGame {
+                                reason: store::EndGameReason::PlayerWon { winner },
+                            };
+                            server.broadcast_message(0, bincode::serialize(&event).unwrap());
+                        }
                     } else {
                         warn!("Player {} sent invalid event:\n\t{:#?}", client_id, event);
                     }
