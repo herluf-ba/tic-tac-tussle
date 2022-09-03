@@ -6,6 +6,7 @@ use renet::{
 use std::net::{SocketAddr, UdpSocket};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
+use store::EndGameReason;
 
 // TicTacTussle converted to utf-8 codes is 84 105 99 84 97 99 84 117 115 115 108 101
 // If you add those up you get 1208.
@@ -94,7 +95,9 @@ fn main() {
                     info!("Client {} disconnected", id);
 
                     // Then end the game, since tic tac toe can't go on with a single player
-                    let event = store::GameEvent::PlayerDisconnected { player_id: id };
+                    let event = store::GameEvent::EndGame {
+                        reason: EndGameReason::PlayerLeft { player_id: id },
+                    };
                     game_state.consume(&event);
                     server.broadcast_message(0, bincode::serialize(&event).unwrap());
 
